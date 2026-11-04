@@ -1,6 +1,6 @@
 {
   "name": "memory-erasure",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Overwrites the free space of a disk with random data so deleted files can't be recovered.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -16,7 +16,8 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
