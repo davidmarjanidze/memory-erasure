@@ -1,82 +1,100 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'url'
+import { randomBytes } from 'node:crypto'
+import { mkdtemp, open, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-import { IStatus, Callback } from './models'
+export interface EraseOptions {
+  /**
+   * Directory on the disk that should be wiped. A temporary folder is created
+   * inside it and removed when the erasure ends. Defaults to `os.tmpdir()`.
+   */
+  directory?: string
+  /** Size of a single write in bytes. Defaults to 1 MiB. */
+  chunkSize?: number
+  /** Called after every write with the total number of bytes written. */
+  onProgress?: (bytesWritten: number) => void
+  /** Stops the erasure. The returned promise rejects with an `AbortError`. */
+  signal?: AbortSignal
+}
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-const EACH_FILE_CONTENT_BYTE_LENGTH = 1e6
-const NEW_MEMORY_PATH = join(__dirname, 'new-memory')
+export interface EraseResult {
+  /** Number of bytes written before the disk got full. */
+  bytesWritten: number
+}
 
-class MemoryErasure {
-  private fileContent = ''
+const DEFAULT_CHUNK_SIZE = 2 ** 20
+// Smallest write worth trying, most file systems allocate 4 KiB blocks.
+const MIN_CHUNK_SIZE = 2 ** 12
+// Keeps every file below the 4 GiB limit of FAT32.
+const MAX_FILE_SIZE = 2 ** 30
 
-  eraseMemory(cb?: Callback): IStatus {
-    this.deleteMemory()
-    mkdirSync(NEW_MEMORY_PATH)
-    this.fileContent = this.generateNewMemoryContent()
-    const status = this.createMemory(cb)
-    this.deleteMemory()
-    status.finished = true
-    return status
-  }
+function isDiskFull(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOSPC' || code === 'EDQUOT'
+}
 
-  private generateNewMemoryContent(): string {
-    let fileContent = String(Math.random())
+/**
+ * Fills the free space of a disk with random data and then deletes it, so
+ * the content of previously deleted files can't be recovered.
+ */
+export async function eraseFreeSpace(
+  options: EraseOptions = {}
+): Promise<EraseResult> {
+  const {
+    directory = tmpdir(),
+    chunkSize = DEFAULT_CHUNK_SIZE,
+    onProgress,
+    signal
+  } = options
 
-    while (Buffer.byteLength(fileContent) < EACH_FILE_CONTENT_BYTE_LENGTH)
-      fileContent += `${String(Math.random())}`
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0)
+    throw new RangeError('chunkSize must be a positive integer')
 
-    while (Buffer.byteLength(fileContent) !== EACH_FILE_CONTENT_BYTE_LENGTH)
-      fileContent = fileContent.slice(0, fileContent.length - 1)
+  signal?.throwIfAborted()
 
-    return fileContent
-  }
+  const data = randomBytes(chunkSize)
+  const minChunkSize = Math.min(chunkSize, MIN_CHUNK_SIZE)
+  const folder = await mkdtemp(join(directory, 'memory-erasure-'))
+  let bytesWritten = 0
+  let size = chunkSize
 
-  private createMemory(cb?: Callback): IStatus {
-    let newMemoryFileIndex = 0
-    const status: IStatus = {
-      finished: false,
-      erasedMemoryByteLength: 0
-    }
-
-    while (true) {
+  try {
+    for (let index = 0; ; index++) {
+      let file
       try {
-        writeFileSync(
-          join(NEW_MEMORY_PATH, String(newMemoryFileIndex++)),
-          this.fileContent
-        )
+        file = await open(join(folder, String(index)), 'w')
+      } catch (error) {
+        if (isDiskFull(error)) return { bytesWritten }
+        throw error
+      }
 
-        if (cb) {
-          status.erasedMemoryByteLength = newMemoryFileIndex * 1e6
-          cb(null, status)
+      try {
+        let fileSize = 0
+        while (fileSize < MAX_FILE_SIZE) {
+          signal?.throwIfAborted()
+
+          let written: number
+          try {
+            ;({ bytesWritten: written } = await file.write(data, 0, size))
+          } catch (error) {
+            if (!isDiskFull(error)) throw error
+            // Retry with smaller writes to fill the last bits of free space.
+            if (size === minChunkSize) return { bytesWritten }
+            size = Math.max(minChunkSize, Math.floor(size / 2))
+            continue
+          }
+
+          fileSize += written
+          bytesWritten += written
+          onProgress?.(bytesWritten)
         }
-      } catch (e) {
-        status.erasedMemoryByteLength = newMemoryFileIndex * 1e6
-
-        if (cb) cb(null, status)
-        return status
+      } finally {
+        // Make sure the data actually reaches the disk before it gets deleted.
+        await file.sync().catch(() => {})
+        await file.close()
       }
     }
-  }
-
-  private deleteMemory(): void {
-    if (existsSync(NEW_MEMORY_PATH))
-      rmSync(NEW_MEMORY_PATH, { recursive: true })
+  } finally {
+    await rm(folder, { recursive: true, force: true })
   }
 }
-
-const memoryErasure = new MemoryErasure()
-
-function eraseMemory(cb?: Callback): undefined | IStatus {
-  try {
-    return memoryErasure.eraseMemory(cb)
-  } catch (error) {
-    if (cb) cb(error, null)
-    else console.error(error)
-    return undefined
-  }
-}
-
-export { eraseMemory, IStatus, Callback }

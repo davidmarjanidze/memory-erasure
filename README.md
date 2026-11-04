@@ -1,63 +1,85 @@
-## Memory Erasure v1.7.0 Documentation
+# memory-erasure
 
-<img src="icon.png" alt="logo" height="200px" >
+<img src="icon.png" alt="logo" height="200px">
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/memory-erasure" target="_blank"><img src="https://img.shields.io/npm/v/memory-erasure.svg" alt="NPM Version" /></a>
-  <a href="https://www.npmjs.com/package/memory-erasure" target="_blank"><img src="https://img.shields.io/npm/l/memory-erasure.svg" alt="Package License" /></a>
-</p>
+[![npm version](https://img.shields.io/npm/v/memory-erasure.svg)](https://www.npmjs.com/package/memory-erasure)
+[![license](https://img.shields.io/npm/l/memory-erasure.svg)](LICENSE)
 
-### Table of contents
+When you delete a file, its content stays on the disk until something else
+is written over it. This package writes random data into all the free space
+of a disk and then deletes it, so the content of deleted files can't be
+recovered.
 
-- [Installation](#Installation)
-- [Description](#Description)
-- [Usage example](#Usage-example)
-- [API](#API)
-  - [Interfaces](#Interfaces)
-  - [eraseMemory](#eraseMemory)
+Requires Node.js 18 or newer. Works with both `import` and `require`.
 
-### Installation
+## Installation
 
 ```console
 npm i memory-erasure
 ```
 
-### Description
-
-Node.js package intended to replace the deleted file content with random
-numbers. It fills the whole free disk space with 1MB of data on each
-iteration. This package is useful when you want to completely erase
-the sensitive data from the disk sectors after you delete the file(s)
-that contain this sensitive data.
-
-### Usage example
+## Usage
 
 ```ts
-import { eraseMemory } from 'memory-erasure'
+import { eraseFreeSpace } from 'memory-erasure'
 
-eraseMemory((err, status) => {
-  if (err) console.error(err)
-  else if (status)
-    console.log(`erased ${status.erasedMemoryByteLength / 1e6 / 1e3} GB`)
+const { bytesWritten } = await eraseFreeSpace({
+  directory: '/Volumes/MyDisk',
+  onProgress: (bytes) => console.log(`${(bytes / 1e9).toFixed(2)} GB`)
 })
+
+console.log(`Done, overwrote ${(bytesWritten / 1e9).toFixed(2)} GB`)
 ```
 
-### API
-
-#### Interfaces
+To stop before the disk is full, pass an `AbortSignal`:
 
 ```ts
-type Callback = (err: any, data: null | IStatus) => void
+const controller = new AbortController()
+
+eraseFreeSpace({ signal: controller.signal }).catch((error) => {
+  if (error.name !== 'AbortError') throw error
+})
+
+controller.abort()
 ```
 
-```ts
-interface IStatus {
-  erasedMemoryByteLength: number
-  finished: boolean
-}
+The temporary files are removed in every case: when the disk is full, when
+it's aborted and when an error happens.
+
+Note that the disk will be completely full while this runs, so other
+programs writing to the same disk may fail during that time.
+
+## API
+
+### `eraseFreeSpace(options?): Promise<EraseResult>`
+
+Options:
+
+| Name         | Type                             | Default       | Description                                                   |
+| ------------ | -------------------------------- | ------------- | ------------------------------------------------------------- |
+| `directory`  | `string`                         | `os.tmpdir()` | Any directory on the disk you want to wipe. It must exist.    |
+| `chunkSize`  | `number`                         | `1048576`     | Bytes per write.                                              |
+| `onProgress` | `(bytesWritten: number) => void` |               | Called after every write with the total bytes written so far. |
+| `signal`     | `AbortSignal`                    |               | Stops the erasure. The promise rejects with an `AbortError`.  |
+
+Result:
+
+| Name           | Type     | Description                             |
+| -------------- | -------- | --------------------------------------- |
+| `bytesWritten` | `number` | Bytes written before the disk got full. |
+
+The promise rejects if the directory doesn't exist, can't be written to, or
+any error other than "no space left" happens.
+
+## Development
+
+```console
+npm run build        # bundle with esbuild and generate type definitions
+npm run lint         # eslint and type checking
+npm test             # run the tests
+npm run npm-publish  # lint, test, build and publish to npm
 ```
 
-#### eraseMemory
+## License
 
-- `cb: Callback`
-- Returns: `IStatus`
+[ISC](LICENSE)
