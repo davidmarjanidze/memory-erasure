@@ -8,9 +8,10 @@
 When you delete a file, its content stays on the disk until something else
 is written over it. This package writes random data into all the free space
 of a disk and then deletes it, so the content of deleted files can't be
-recovered.
+recovered. It's meant for the case where you've just removed sensitive data
+and want it gone for good.
 
-Requires Node.js 18 or newer. Works with both `import` and `require`.
+Requires Node.js 18.15 or newer. Works with both `import` and `require`.
 
 ## Installation
 
@@ -46,8 +47,22 @@ controller.abort()
 The temporary files are removed in every case: when the disk is full, when
 it's aborted and when an error happens.
 
-Note that the disk will be completely full while this runs, so other
-programs writing to the same disk may fail during that time.
+By default 1 GiB of free space is left untouched, so other programs can
+keep writing to the disk while this runs. The free space is checked again
+every 64 MiB, so it adapts if other programs use some of it in the meantime.
+Change the amount with `keepFree`:
+
+```ts
+// Leave 5 GiB free
+await eraseFreeSpace({ keepFree: 5 * 1024 * 1024 * 1024 })
+
+// Fill the disk completely
+await eraseFreeSpace({ keepFree: 0 })
+```
+
+Deleted data in the space that's left free isn't overwritten. Use
+`keepFree: 0` if you need every byte wiped, but note that the disk will then
+be completely full for a while and other programs writing to it may fail.
 
 ## API
 
@@ -59,26 +74,18 @@ Options:
 | ------------ | -------------------------------- | ------------- | ------------------------------------------------------------- |
 | `directory`  | `string`                         | `os.tmpdir()` | Any directory on the disk you want to wipe. It must exist.    |
 | `chunkSize`  | `number`                         | `1048576`     | Bytes per write.                                              |
+| `keepFree`   | `number`                         | `1073741824`  | Bytes of free space to leave untouched (1 GiB).               |
 | `onProgress` | `(bytesWritten: number) => void` |               | Called after every write with the total bytes written so far. |
 | `signal`     | `AbortSignal`                    |               | Stops the erasure. The promise rejects with an `AbortError`.  |
 
 Result:
 
-| Name           | Type     | Description                             |
-| -------------- | -------- | --------------------------------------- |
-| `bytesWritten` | `number` | Bytes written before the disk got full. |
+| Name           | Type     | Description                    |
+| -------------- | -------- | ------------------------------ |
+| `bytesWritten` | `number` | Bytes written before stopping. |
 
 The promise rejects if the directory doesn't exist, can't be written to, or
 any error other than "no space left" happens.
-
-## Development
-
-```console
-npm run build        # bundle with esbuild and generate type definitions
-npm run lint         # eslint and type checking
-npm test             # run the tests
-npm run npm-publish  # lint, test, build and publish to npm
-```
 
 ## License
 

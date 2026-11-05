@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, statfs } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -51,6 +51,34 @@ test('does nothing when the signal is already aborted', async () => {
 test('rejects an invalid chunk size', async () => {
   for (const chunkSize of [0, -1, 1.5, NaN])
     await assert.rejects(eraseFreeSpace({ directory, chunkSize }), RangeError)
+})
+
+test('rejects an invalid keepFree', async () => {
+  for (const keepFree of [-1, 1.5, NaN, Infinity])
+    await assert.rejects(eraseFreeSpace({ directory, keepFree }), RangeError)
+})
+
+test('writes nothing when less than keepFree is free', async () => {
+  const result = await eraseFreeSpace({
+    directory,
+    keepFree: Number.MAX_SAFE_INTEGER
+  })
+  assert.deepEqual(result, { bytesWritten: 0 })
+  assert.deepEqual(await readdir(directory), [])
+})
+
+test('stops writing once only keepFree is left', async () => {
+  const { bavail, bsize } = await statfs(directory)
+  const allowed = 1024 * 1024
+  const { bytesWritten } = await eraseFreeSpace({
+    directory,
+    chunkSize: 64 * 1024,
+    keepFree: bavail * bsize - allowed
+  })
+  assert.ok(bytesWritten > 0, 'expected some data to be written')
+  // Other programs may free some space meanwhile, so allow a bit of slack.
+  assert.ok(bytesWritten <= 4 * allowed, `wrote ${bytesWritten} bytes`)
+  assert.deepEqual(await readdir(directory), [])
 })
 
 test('rejects a missing directory', async () => {
