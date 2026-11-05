@@ -1,3 +1,9 @@
+# 2.1.0 (2026-11-05)
+
+- Add the `keepFree` option, which leaves 1 GiB of free space by default so
+  other programs can keep writing to the disk
+- Require Node.js 18.15 or newer, for `fs.statfs`
+
 # 2.0.1 (2026-11-04)
 
 Export `package.json`, so `require('memory-erasure/package.json')` works.

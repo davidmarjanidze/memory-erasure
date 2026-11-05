@@ -1,6 +1,6 @@
 {
   "name": "memory-erasure",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Overwrites the free space of a disk with random data so deleted files can't be recovered.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -23,7 +23,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18.15"
   },
   "scripts": {
     "build": "node build.js",
@@ -32,7 +32,7 @@
     "test": "node --test \"test/**/*.test.ts\"",
     "npm-publish": "npm run lint && npm test && npm run build && npm publish"
   },
-  "author": "Dato Marjanidze",
+  "author": "David Marjanidze",
   "license": "ISC",
   "homepage": "https://github.com/davidmarjanidze/memory-erasure#readme",
   "repository": {
